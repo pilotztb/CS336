@@ -1,8 +1,10 @@
-### **完整指南：通过 VS Code 将远程服务器项目连接到 GitHub**
+# 创建github仓库并实现在服务器上连接（通过vscode）
+
+## **完整指南：通过 VS Code 将远程服务器项目连接到 GitHub**
 
 **目标场景**: 你正在使用本地的 VS Code，通过 "Remote - SSH" 扩展连接到一台远程Linux服务器。你希望服务器上的一个项目（例如 `cs336`）能被 Git 管理，并推送到 GitHub 上的一个新仓库。
 
-#### **阶段一：基础环境准备 (在服务器上)**
+### **阶段一：基础环境准备 (在服务器上)**
 
 在开始之前，确保你的服务器满足以下条件。
 
@@ -26,7 +28,7 @@
    git config --global user.email "你的GitHub注册邮箱"
    ```
 
-#### **阶段二：配置服务器与 GitHub 的 SSH 免密连接**
+### **阶段二：配置服务器与 GitHub 的 SSH 免密连接**
 
 这是解决 `Permission denied (publickey)` 错误的关键，**只需为每台服务器配置一次**。
 
@@ -67,7 +69,7 @@
 
    如果看到包含你用户名的欢迎语 (`Hi pilotztb! You've successfully authenticated...`)，则表示 SSH 连接配置成功！
 
-#### **阶段三：在 GitHub 上创建远程仓库**
+### **阶段三：在 GitHub 上创建远程仓库**
 
 1.  登录 GitHub，点击右上角的 `+` 号，选择 **New repository**。
 2.  **Repository name**: 填写你的仓库名（例如 `CS336`）。
@@ -75,7 +77,7 @@
 4.  点击 **Create repository**。
 5.  创建成功后，页面会显示仓库的地址。找到并**复制 SSH 地址**，它看起来像这样：`git@github.com:pilotztb/CS336.git`。
 
-#### **阶段四：在 VS Code 中操作，完成首次代码推送**
+### **阶段四：在 VS Code 中操作，完成首次代码推送**
 
 现在，所有准备工作都已完成。我们回到 VS Code（已通过SSH连接到服务器）进行最后的操作。
 
@@ -124,3 +126,84 @@
      * `-u` 参数会建立本地 `main` 分支和远程 `main` 分支的联系，以后你再推送时，只需简单地使用 `git push` 即可。
 
 **至此，你的服务器项目已经通过 VS Code 成功连接并推送到了 GitHub 仓库！** 你可以刷新 GitHub 页面，看到你的代码已经上传上去了。
+
+# 通过vscode实现想github仓库push和pull
+
+## 命令行
+
+### **第1步：创建或修改文件**
+
+首先，你需要在你的项目文件夹中进行实际的工作，比如创建新文件或修改已有文件。
+
+```bash
+# 示例：创建一个名为 new_file.md 的新文件，并写入内容
+echo "这是一些新的笔记内容。" > new_file.md
+```
+
+### **第2步：查看状态 (好习惯)**
+
+在执行任何 Git 操作前，先用 `git status` 检查一下仓库的当前状态。
+
+```bash
+git status
+```
+
+  * 这个命令会告诉你哪些文件是新创建的（untracked files）、哪些文件被修改了。
+
+### **第3步：暂存更改**
+
+决定好要将哪些更改记录下来后，使用 `git add` 命令将它们添加到“暂存区”。
+
+```bash
+# 暂存所有更改（最常用）
+git add .
+
+# 或者，只暂存某一个文件
+# git add new_file.md
+```
+
+### **第4步：提交更改**
+
+将暂存区里的所有内容创建一个版本快照（commit），并附上清晰的说明信息。
+
+```bash
+# 使用 -m 参数来直接附带提交信息
+git commit -m "Add new notes in new_file.md"
+```
+
+  * 提交信息（双引号内的内容）应当清晰地描述你这次的改动。
+
+### **第5步：推送到 GitHub**
+
+最后，将你本地仓库中新建的提交推送到 GitHub 远程仓库。
+
+```bash
+git push origin main
+```
+
+  * `origin` 是你远程仓库的默认名称。
+  * `main` 是你要推送到的分支名称。
+
+-----
+
+### **完整流程示例**
+
+从创建文件到推送到 GitHub 的一次完整操作：
+
+```bash
+# 1. 在项目中创建一个新文件
+echo "def new_feature():\n    return True" > feature.py
+
+# 2. 检查状态，会看到 feature.py 是“未跟踪”
+git status
+
+# 3. 暂存所有更改
+git add .
+
+# 4. 提交更改
+git commit -m "Feat: Add new feature toggle function"
+
+# 5. 推送到 GitHub
+git push origin main
+```
+
