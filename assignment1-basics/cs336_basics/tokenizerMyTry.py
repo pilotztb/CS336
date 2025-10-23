@@ -71,7 +71,7 @@ def train_bpe(
     inputPath : str,
     vocabSize : int,
     spectialToken : list[str]
-) -> BPETokenizer:
+) :
     vocab = {x : bytes([x]) for x in range(256)}
     
     for tokenStr in spectialToken:
