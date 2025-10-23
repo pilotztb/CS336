@@ -11,7 +11,8 @@ from torch import Tensor
 
 # from cs336_basics.tokenizer import train_bpe, Tokenizer
 # from cs336_basics.BPETokenizer import BPETokenizer, train_bpe
-from cs336_basics.tokenizer import train_bpe
+# from cs336_basics.tokenizer import train_bpe
+from cs336_basics.tokenizerMyTry import train_bpe
 
 
 def run_linear(
