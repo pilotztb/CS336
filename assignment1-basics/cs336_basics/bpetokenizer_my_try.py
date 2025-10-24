@@ -1,15 +1,31 @@
 from collections import defaultdict, Counter
 import regex as re
-from typing import Optional, Iterable
 
 class BPETokenizer:
     def __init__(
         self,
         vocab: dict[int, bytes],
         merges: list[tuple[bytes, bytes]],
-        spectial_token: Optional[list[str]] = None  
+        spectial_tokens: list[str]
     ):
-        pass
+        self.vocab = vocab
+        self.merges = merges
+        self.spectialTokens = spectial_tokens or []
+        
+
+        self.bytesToIntVocab = {v : k for k, v in vocab.items()}
+
+        self.bpeRanks = dict(zip(merges, range(len(merges))))
+
+        self.spectialTokenBytes = [token.encode("utf-8") for token in self.spectialTokens]
+
+        for tokenBytes in self.spectialTokenBytes:
+            if tokenBytes not in self.bytesToIntVocab:
+                newID = len(self.vocab)
+                self.vocab[newID] = tokenBytes
+                self.bytesToIntVocab[tokenBytes] = newID
+
+
 
     def encode(self, text: str) -> list[int]:
         """
