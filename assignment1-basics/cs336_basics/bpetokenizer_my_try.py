@@ -11,7 +11,6 @@ class BPETokenizer:
         self.vocab = vocab
         self.merges = merges
         self.spectialTokens = spectial_tokens or []
-        
 
         self.bytesToIntVocab = {v : k for k, v in vocab.items()}
 
@@ -44,5 +43,53 @@ class BPETokenizer:
         """
         将一个 token ID 列表解码回一个字符串。
         """
-        return ""
+        allBytes = [self.vocab.get(id) for id in ids]
+        clearNoneBytes = b"".join(b for b in allBytes if b is not None)
+        return clearNoneBytes.decode("utf-8", errors="replace")
     
+
+    def _mergeAccordingRank(self, tupleBytes) -> list[bytes]:
+        listBytes = list(tupleBytes)
+        adjPairs = set(zip(listBytes, listBytes[1:]))
+
+        if not adjPairs:
+            return listBytes
+        
+        while True:
+            # 首先需要根据找到优先级最高的
+            targetMerge = min(adjPairs, key=lambda pair: self.bpeRanks.get(pair, float('inf')))
+
+            if targetMerge not in self.bpeRanks:
+                break
+
+            # 然后合并，合并分两步，先将不需要合并的用extend加入，再将需要合并的用+和append加入
+            first, second = targetMerge
+            i = 0
+            newListBytes = []
+            while i < len(listBytes):
+                try:
+                    j = listBytes.index(first, i)
+                except ValueError:
+                    newListBytes.extend(listBytes[i: ])
+                    break
+                else:
+                    newListBytes.extend(listBytes[i: j])
+                    i = j
+
+                if listBytes[i] == first and i + 1 < len(listBytes) and listBytes[i + 1] == second:
+                    newListBytes.append(first + second)
+                    i += 2
+                else:
+                    newListBytes.append(listBytes[i])
+                    i += 1
+            
+            listBytes = newListBytes
+            if len(listBytes) == 1:
+                break
+            else:
+                adjPairs = set(zip(listBytes, listBytes[1:]))
+
+        return listBytes
+
+            
+

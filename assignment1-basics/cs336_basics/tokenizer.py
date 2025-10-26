@@ -260,7 +260,7 @@ class BPETokenizer:
             while i < len(word):
                 try:
                     # 找到 first 的下一个位置
-                    j = word.index(first, i)
+                    j = word.index(first, i) 
                 except ValueError:
                     new_word.extend(word[i:])
                     break
@@ -268,7 +268,7 @@ class BPETokenizer:
                     new_word.extend(word[i:j])
                     i = j
 
-                # 检查是否是我们要合并的 bigram
+                # 检查是否是我们要合并                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                的 bigram
                 if word[i] == first and i < len(word) - 1 and word[i + 1] == second:
                     new_word.append(first + second)
                     i += 2

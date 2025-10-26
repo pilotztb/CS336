@@ -101,3 +101,5 @@ def train_bpe(
         vocab[len(vocab)] = newToken
 
     return vocab, merges
+
+       
