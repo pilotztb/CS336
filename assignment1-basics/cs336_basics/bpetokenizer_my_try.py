@@ -1,6 +1,12 @@
 from collections import defaultdict, Counter
 import regex as re
 
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+def strToTupleBytes(str):
+    tmpList = [x for x in str.encode("utf-8")]
+    tmpList = [bytes([x]) for x in tmpList]
+    return tuple(tmpList)
+
 class BPETokenizer:
     def __init__(
         self,
@@ -90,6 +96,25 @@ class BPETokenizer:
                 adjPairs = set(zip(listBytes, listBytes[1:]))
 
         return listBytes
+    
+    def _tokenizeNormal(self, str) -> list[int]:
+        # 预分词
+        preTokens = []
+        for match in re.finditer(PAT, str):
+            word = match.group(0)
+            preTokens.append(word)
 
+
+        tokenID = []
+        # 遍历分词后列表里的每个单词
+        for word in preTokens:
+            # 首先转为tuple元组，里面放的是bytes
+            wordTupleByte = strToTupleBytes(word)
             
+            # 然后合并
+            merges = self._mergeAccordingRank(wordTupleByte)
 
+            # 合并后的到从bytes到int的优先级里面去查对应的int
+            tokenID.extend(self.bytesToIntVocab[b] for b in merges)
+
+        return tokenID
