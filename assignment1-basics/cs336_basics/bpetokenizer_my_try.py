@@ -35,7 +35,25 @@ class BPETokenizer:
         """
         将一个原始字符串编码为一个 token ID 列表。
         """
-        return []
+        token = []
+        sortedSpectialToken = sorted(self.spectialTokens, key=len, reverse=True)
+        sortedSpectialPattern = "|".join(map(re.escape, sortedSpectialToken))
+        if sortedSpectialPattern:
+            paragraphList = re.split(f"({sortedSpectialPattern})", text)
+        else:
+            paragraphList = [text]
+
+        for paragraph in paragraphList:
+            if not paragraph:
+                continue
+
+            if paragraph in self.spectialTokens:
+                token.append(self.bytesToIntVocab[paragraph.encode("utf-8")])
+            else:
+                token.extend(self._tokenizeNormal(paragraph))
+
+
+        return token
     
     def encode_iterable(self, iterable: Iterable[str]) -> Iterable[int]:
         """

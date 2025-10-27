@@ -919,6 +919,210 @@ def to_bytes_tuple(word: str) -> tuple[bytes]:
 
 -----
 
-现在我们已经讲解了 `_tokenize_normal` 函数。它起到了一个“调度员”的作用：先用 `PAT` 切分，然后对每个切分块调用核心的 `_apply_merges`，最后将结果转换为 ID。
+# 第三步 C：主方法 `encode` (协调与分发)
 
-接下来，我们可以讲解调用 `_tokenize_normal` 的主 `encode` 方法了。您准备好了吗？
+## **宏观作用**
+
+`encode` 方法是用户直接调用的接口，用于执行**从字符串到 token ID 列表**的完整转换。它扮演着“总指挥”的角色：
+
+1.  **识别并分离特殊 Token**：它首先要处理输入字符串中可能存在的特殊 token（例如 `<|endoftext|>`）。它需要准确地将这些特殊 token 与普通文本块分离开来，同时确保**优先匹配最长**的特殊 token（例如 `<|endoftext|><|endoftext|>` 优先于 `<|endoftext|>`)。
+2.  **分发处理任务**：对于分离出来的各个部分：
+      * 如果是**特殊 token**，它直接查询该 token 的 ID。
+      * 如果是**普通文本块**，它将这个块交给 `_tokenize_normal` 辅助函数去处理（`_tokenize_normal` 内部会调用 `_apply_merges` 来执行 BPE 合并）。
+3.  **汇总结果**：最后，它将处理所有部分得到的 token ID 按顺序收集起来，形成最终的完整 token ID 列表并返回。
+
+-----
+
+## **代码实现 (源自优秀代码 `tokenizer.py` / `adapters.py`)**
+
+```python
+    # 定义在 BPETokenizer 类内部
+    def encode(self, text: str) -> list[int]:
+        """
+        将一个原始字符串编码为一个 token ID 列表。
+        (来自 adapters.py)
+        """
+        # --- 段落 1: 初始化 ---
+        tokens = [] # 1.1
+
+        # --- 段落 2: 按特殊 Token 分割文本 ---
+        sorted_special_tokens = sorted(self.special_tokens, key=len, reverse=True) # 2.1
+        
+        pattern_str = "|".join(map(re.escape, sorted_special_tokens)) # 2.2
+        if pattern_str: # 2.3
+            # 使用带捕获组的 split (f-string 方便插入变量)
+            parts = re.split(f"({pattern_str})", text) # 2.4
+        else: # 2.5
+            # 如果没有特殊 token，整个文本就是一个部分
+            parts = [text] # 2.6
+
+        # --- 段落 3: 遍历并处理各个文本块 ---
+        for part in parts: # 3.1
+            # 跳过 re.split 可能产生的空字符串
+            if not part: # 3.2
+                continue # 3.3
+                
+            # --- 段落 4: 分流处理 ---
+            if part in self.special_tokens: # 4.1
+                # 如果当前部分是特殊 token 列表中的一员
+                tokens.append(self.byte_to_token_id[part.encode("utf-8")]) # 4.2
+            else: # 4.3
+                # 如果是普通文本块
+                # 调用 _tokenize_normal 处理，并将返回的 ID 列表追加到结果中
+                tokens.extend(self._tokenize_normal(part)) # 4.4
+
+        # --- 段落 5: 返回结果 ---
+        return tokens # 5.1
+
+    # --- 依赖的辅助函数 (假设已定义) ---
+    # def _tokenize_normal(self, text: str) -> list[int]: ...
+```
+
+-----
+
+## **逐行分析**
+
+### **段落 1: 初始化**
+
+  * **行 1.1 `tokens = []`**
+      * **作用**：初始化一个空列表。
+      * **解释**：这个 `tokens` 列表将用于收集编码过程中产生的所有 token ID，并作为最终结果返回。
+
+### **段落 2: 按特殊 Token 分割文本**
+
+  * **行 2.1 `sorted_special_tokens = sorted(self.special_tokens, key=len, reverse=True)`**
+
+      * **作用**：获取 `__init__` 中存储的 `self.special_tokens` 列表（例如 `['<|eot|>', '<|eot|><|eot|>']`），并将其按**长度降序**排序。
+      * **解释**：排序是为了确保在构建正则表达式时，更长的 token （如 `<|eot|><|eot|>`）出现在 `|` （或）的前面，从而被优先匹配。排序后的结果存入 `sorted_special_tokens`。
+
+  * **行 2.2 `pattern_str = "|".join(map(re.escape, sorted_special_tokens))`**
+
+      * **作用**：构建用于 `re.split` 的正则表达式模式字符串的主体部分。
+      * **解释**：
+          * `map(re.escape, ...)`: 对排序后的每个特殊 token 应用 `re.escape`，防止其中的特殊正则字符（如 `|`）干扰模式。
+          * `"|".join(...)`: 用 `|` (逻辑或) 将转义后的特殊 token 连接起来。例如，得到 `'<\\|eot\\|><\\|eot\\|>|<\\|eot\\|>'`。
+
+  * **行 2.3 `if pattern_str:`**
+
+      * **作用**：检查是否有特殊 token。
+      * **解释**：如果 `self.special_tokens` 为空，`pattern_str` 也会是空字符串，`if` 条件为 `False`。
+
+  * **行 2.4 `parts = re.split(f"({pattern_str})", text)`**
+
+      * **作用**：使用正则表达式将输入 `text` 切分成块。
+
+      * **解释**：
+          * `f"({pattern_str})"`: 构建最终的正则表达式模式。关键在于**外层的圆括号 `()`**，它创建了一个**捕获组**。
+          * `re.split(模式, 字符串)`: 在 `text` 中查找所有匹配 `模式` 的地方，并进行切分。**因为模式带有捕获组**，`re.split` 不仅返回被切开的普通文本块，还会**保留**匹配到的特殊 token 本身作为列表中的独立元素。
+          * **示例**：如果 `text = "Hi<|eot|>Bye"` 且 `pattern_str = "<\\|eot\\|>"`, 则 `re.split("(<\eot\\|>)"`, text)`返回`['Hi', '\<|eot|\>', 'Bye']\`。
+          * `parts = ...`: 将切分结果（一个字符串列表）赋值给 `parts`。
+
+      * **与train_bpe的区别**
+
+            * **`encode` 方法中使用** (`tokenizer.py` / `adapters.py`)：
+
+              ```python
+              pattern_str = "|".join(map(re.escape, sorted_special_tokens))
+              parts = re.split(f"({pattern_str})", text) # 注意外层的括号 ()
+              ```
+
+            * **`train_bpe` 训练过程中使用** (`_get_initial_word_freqs` 函数，见 `tokenizer.py` / `7参考学习别人优秀代码train_bpe.md` / `tokenizerMyTry.py`)：
+
+              ```python
+              special_pattern = "|".join(map(regex.escape, special_tokens))
+              chunks = regex.split(special_pattern, text) # 注意这里没有外层的括号 ()
+              ```
+
+          **核心区别在于正则表达式模式中是否使用了捕获组 `()`。**
+
+          **为什么 `encode` 方法需要 `f"({pattern_str})"` 这种写法？**
+
+            * **目标**：`encode` 方法在处理输入文本时，需要**区分**普通文本块和特殊 token 块。它需要知道 `'Hi'` 是普通文本（需要交给 `_tokenize_normal` 处理），而 `'<|eot|>'` 是特殊 token（需要直接查字典获取 ID）。
+            * **`re.split()` 使用捕获组的行为**：当 `re.split()` 的**分割模式包含捕获组 `()`** 时，它不仅会返回被分割开的文本块，**还会将被捕获的分隔符本身**也包含在返回的列表中。
+                * **示例**：
+                    * `pattern = "(<\\|eot\\|>)"` (带捕获组)
+                    * `text = "Hi<|eot|>Bye<|eot|>"`
+                    * `re.split(pattern, text)` 返回 `['Hi', '<|eot|>', 'Bye', '<|eot|>', '']`
+            * **效果**：通过使用 `f"({pattern_str})"`，`encode` 方法得到的 `parts` 列表就像 `['普通文本', '特殊token', '普通文本', '特殊token', ...]` 这样，它**保留了特殊 token 本身**，使得后续 `for part in parts:` 循环可以通过 `if part in self.special_tokens:` 来准确地识别并分别处理这两种类型的块。
+
+          **为什么 `train_bpe` (`_get_initial_word_freqs`) 可以用 `regex.split(special_pattern, text)` 这种写法？**
+
+            * **目标**：`train_bpe` 在预分词阶段的目标是**忽略**特殊 token，只关注它们**之间**的普通文本块，并在这些普通文本块上应用 `PAT` 正则表达式来统计“单词”频率。
+            * **`re.split()` 不使用捕获组的行为**：当 `re.split()` 的分割模式**不包含**捕获组时，它只会返回被分割开的文本块，而**分隔符本身会被丢弃**。
+                * **示例**：
+                    * `pattern = "<\\|eot\\|>"` (不带捕获组)
+                    * `text = "Hi<|eot|>Bye<|eot|>"`
+                    * `re.split(pattern, text)` 返回 `['Hi', 'Bye', '']`
+            * **效果**：通过使用 `regex.split(special_pattern, text)`，`_get_initial_word_freqs` 函数得到的 `chunks` 列表只包含普通文本块（例如 `['Hi', 'Bye', '']`），特殊 token 已经被丢弃了。这正好符合它的需求，因为它只需要在这些普通文本块上进一步使用 `PAT` 进行分词和统计。
+
+          **总结**：
+
+          两种写法都是正确的，但服务于不同的目的：
+
+            * `encode` 需要**保留并识别**特殊 token，所以使用带捕获组 `()` 的 `re.split`。
+            * `train_bpe` (`_get_initial_word_freqs`) 只需要处理特殊 token **之间**的文本，需要**丢弃**特殊 token，所以使用不带捕获组的 `re.split`。
+
+  * **行 2.5 `else:`**
+
+      * **作用**：处理没有定义特殊 token 的情况。
+
+  * **行 2.6 `parts = [text]`**
+
+      * **作用**：如果 `if pattern_str:` 为 `False`，执行此行。
+      * **解释**：将整个输入 `text` 作为一个单独的元素放入 `parts` 列表中，表示只有一个普通文本块需要处理。
+
+### **段落 3: 遍历并处理各个文本块**
+
+  * **行 3.1 `for part in parts:`**
+
+      * **作用**：启动一个循环，遍历 `parts` 列表中的每一个字符串 `part`。
+      * **解释**：`part` 在每次迭代中可能是普通文本块（如 `'Hi'`），也可能是特殊 token 字符串（如 `'<|eot|>'`）。
+
+  * **行 3.2 `if not part:`**
+
+      * **作用**：检查当前块 `part` 是否为空字符串。
+      * **解释**：`re.split` 有时会在字符串开头、末尾或两个分隔符紧挨着时产生空字符串。我们需要跳过这些空块。
+
+  * **行 3.3 `continue`**
+
+      * **作用**：如果行 3.2 条件为真（`part` 是空字符串），执行此行。
+      * **解释**：立即结束当前这次循环迭代，跳到 `for part in parts:` 的下一次迭代。
+
+### **段落 4: 分流处理**
+
+  * **行 4.1 `if part in self.special_tokens:`**
+
+      * **作用**：判断当前块 `part` 是否是我们定义的特殊 token 之一。
+      * **解释**：直接检查 `part` 字符串是否存在于 `__init__` 中存储的 `self.special_tokens` 原始字符串列表中。
+
+  * **行 4.2 `tokens.append(self.byte_to_token_id[part.encode("utf-8")])`**
+
+      * **作用**：如果行 4.1 条件为真（`part` 是特殊 token），执行此行。
+      * **解释**：
+          * `part.encode("utf-8")`: 将特殊 token 字符串（如 `'<|eot|>'`) 转换为其字节表示 (`b'<|eot|>'`)。
+          * `self.byte_to_token_id[...]`: 使用 `__init__` 中创建的反向词汇表，查找这个字节表示对应的整数 token ID。
+          * `tokens.append(...)`: 将找到的 ID 添加到最终的 `tokens` 结果列表中。
+
+  * **行 4.3 `else:`**
+
+      * **作用**：如果行 4.1 条件为假（`part` 是普通文本块）时执行。
+
+  * **行 4.4 `tokens.extend(self._tokenize_normal(part))`**
+
+      * **作用**：调用 `_tokenize_normal` 辅助函数来处理这个普通文本块 `part`。
+      * **解释**：
+          * `self._tokenize_normal(part)`: 将普通文本块 `part` 传递给 `_tokenize_normal`。该函数会执行预分词、字节化、BPE 合并和 ID 转换，最终返回一个代表这个 `part` 的 token ID 列表（可能包含多个 ID）。
+          * `tokens.extend(...)`: 使用 `.extend()` 将 `_tokenize_normal` 返回的 ID **列表**中的所有元素逐一追加到最终的 `tokens` 结果列表中。
+
+### **段落 5: 返回结果**
+
+  * **行 5.1 `return tokens`**
+      * **作用**：当 `for part in parts:` 循环（行 3.1）处理完所有文本块后，执行此行。
+      * **解释**：返回包含所有 token ID 的完整列表 `tokens` 作为 `encode` 方法的结果。
+
+-----
+
+现在我们已经完整地讲解了 `encode` 方法。它通过巧妙地使用 `re.split` 和捕获组来分离特殊 token，然后将任务分派给 `_tokenize_normal`（处理普通文本）或直接查字典（处理特殊 token），最终汇总结果。
+
+接下来只剩下 `encode_iterable` 方法了，它的实现非常简单。您想继续吗？
+
