@@ -1,5 +1,5 @@
-from collections import defaultdict, Counter
 import regex as re
+from typing import Iterable
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 def strToTupleBytes(str):
@@ -11,11 +11,11 @@ class BPETokenizer:
         self,
         vocab: dict[int, bytes],
         merges: list[tuple[bytes, bytes]],
-        spectial_tokens: list[str]
+        special_tokens: list[str]
     ):
         self.vocab = vocab
         self.merges = merges
-        self.spectialTokens = spectial_tokens or []
+        self.spectialTokens = special_tokens or []
 
         self.bytesToIntVocab = {v : k for k, v in vocab.items()}
 
@@ -59,7 +59,8 @@ class BPETokenizer:
         """
         将一个字符串迭代器（如文件）编码为 token ID 迭代器。
         """
-        pass
+        for chunk in iterable:
+            yield from self.encode(chunk)
 
 
     def decode(self, ids: list[int]) -> str:
