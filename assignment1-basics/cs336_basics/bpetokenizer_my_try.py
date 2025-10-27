@@ -95,11 +95,11 @@ class BPETokenizer:
                 adjPairs = set(zip(listBytes, listBytes[1:]))
 
         return listBytes
-    
-    def _tokenizeNormal(self, str) -> list[int]:
+
+    def _tokenizeNormal(self, text: str) -> list[int]:
         # 预分词
         preTokens = []
-        for match in re.finditer(PAT, str):
+        for match in re.finditer(PAT, text):
             word = match.group(0)
             preTokens.append(word)
 

@@ -47,7 +47,7 @@ def _getAdjPairFreq(
     return adjPairFreq
     
 
-def _mergeMaxPairFreqWord(
+def _mergeMaxAdjPairFreqWord(
     wordFreq : dict[tuple[bytes, ...], int],
     mergePair : tuple[bytes, bytes]
 ):
@@ -94,7 +94,7 @@ def train_bpe(
         candidates = [pair for pair, freq in allAdjPairFreq.items() if freq == max_freq]
         best_pair = max(candidates) # 字典序平局规则
 
-        wordBytesFreq = _mergeMaxPairFreqWord(wordBytesFreq, best_pair)
+        wordBytesFreq = _mergeMaxAdjPairFreqWord(wordBytesFreq, best_pair)
 
         merges.append(best_pair)
         newToken = best_pair[0] + best_pair[1]
