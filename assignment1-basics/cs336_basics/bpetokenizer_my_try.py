@@ -3,8 +3,7 @@ import regex as re
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 def strToTupleBytes(str):
-    tmpList = [x for x in str.encode("utf-8")]
-    tmpList = [bytes([x]) for x in tmpList]
+    tmpList = [bytes([x]) for x in str.encode("utf-8")]
     return tuple(tmpList)
 
 class BPETokenizer:
@@ -114,7 +113,7 @@ class BPETokenizer:
             # 然后合并
             merges = self._mergeAccordingRank(wordTupleByte)
 
-            # 合并后的到从bytes到int的优先级里面去查对应的int
+            # 合并后的到从bytes到int的字典里优先级里面去查对应的int
             tokenID.extend(self.bytesToIntVocab[b] for b in merges)
 
         return tokenID
