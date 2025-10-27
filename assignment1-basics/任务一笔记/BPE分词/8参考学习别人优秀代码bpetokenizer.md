@@ -1126,3 +1126,232 @@ def to_bytes_tuple(word: str) -> tuple[bytes]:
 
 接下来只剩下 `encode_iterable` 方法了，它的实现非常简单。您想继续吗？
 
+好的，我们继续！您已经完成了 `BPETokenizer` 类的 `__init__`, `decode`, `_apply_merges` (或 `_mergeAccordingRank`), `_tokenize_normal`, 和主 `encode` 方法。现在只剩下最后一个方法了：`encode_iterable`。
+
+正如讲义所说，这个方法是为了处理**大型文件**而设计的，避免一次性将整个文件读入内存导致内存溢出。它的实现利用了 Python 的**迭代器**和 `yield` 关键字，非常简洁高效。
+
+-----
+
+# 第四步：实现 `encode_iterable` (流式编码)
+
+## **宏观作用**
+
+`encode_iterable` 方法的目标是接收一个**可迭代**的对象 `iterable`（例如一个打开的文件句柄，或者一个每次返回一行文本的列表），然后**逐块**读取这个对象提供的内容，对每一块调用我们已经写好的 `encode` 方法进行编码，最后将得到的 token ID **逐个地**（而不是一次性地）返回给调用者。
+
+这种“边读边处理边返回”的方式称为**流式处理**或**惰性求值 (lazy evaluation)**。它的核心优势在于**内存效率**：无论输入的可迭代对象有多大（哪怕是几百 GB 的文件），`encode_iterable` 在任何时刻都只需要在内存中处理其中一小块数据，内存占用非常低。
+
+## **逻辑 (来自讲义 和优秀代码)**
+
+这个方法的逻辑非常直接，主要依赖 Python 的 `for` 循环和 `yield from` 语句：
+
+1.  **遍历输入**：使用 `for chunk in iterable:` 循环来遍历输入的可迭代对象 `iterable`。
+      * 如果 `iterable` 是一个文件句柄（例如通过 `with open(...) as f:` 获得），这个循环通常会**逐行**读取文件内容，`chunk` 在每次迭代中就是文件的一行（字符串）。
+      * 如果 `iterable` 是一个列表或其他序列，它会按顺序取出其中的每个元素。
+2.  **调用 `encode`**：对于从 `iterable` 中获取的**每一个** `chunk` (字符串)，调用我们已经实现的 `self.encode(chunk)` 方法。这个方法会返回代表该 `chunk` 的 **token ID 列表**（例如 `[15496, 995]`）。
+3.  **`yield from` 产出结果**：使用 `yield from` 语句将 `self.encode(chunk)` 返回的 token ID 列表中的**每一个** ID **逐个地**“产出”（yield）给 `encode_iterable` 方法的调用者。
+      * `yield from` 的作用就是帮你省去了一个内层循环。`yield from [15496, 995]` 的效果等同于：
+        ```python
+        for _id in [15496, 995]:
+            yield _id
+        ```
+      * 关键在于 `yield`：它**暂停**函数的执行，将一个值返回给调用者，并在下次调用者请求下一个值时从暂停处**恢复**执行。这使得整个 `encode_iterable` 成为一个**生成器 (generator)**，实现了惰性求值。
+
+## **代码实现 (源自优秀代码 `tokenizer.py` / `adapters.py`)**
+
+```python
+    # 定义在 BPETokenizer 类内部
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterable[int]: # 1.1 (类型提示改为 Iterable)
+        """
+        将一个字符串迭代器（如文件）编码为 token ID 迭代器。
+        (来自 adapters.py)
+        """
+        # --- 段落 1: 遍历输入迭代器 ---
+        for chunk in iterable: # 1.2
+            # --- 段落 2: 对块进行编码并逐个产出ID ---
+            #    (注意：优秀代码中直接 yield from self.encode(chunk))
+            #    为了清晰，分解一下：
+            ids_for_chunk = self.encode(chunk) # 2.1 
+            yield from ids_for_chunk # 2.2 
+            # 上面两行等价于下面一行：
+            # yield from self.encode(chunk) # 2.3 (优秀代码的写法)
+```
+
+*(注意：我稍微修改了返回类型提示，从 `iter` 改为 `Iterable[int]`，这更准确地描述了它返回一个可以迭代产生整数的对象。优秀代码中使用的是 `iter` 或 `Iterable`)*
+
+## **逐行分析**
+
+  * **行 1.1 `def encode_iterable(self, iterable: Iterable[str]) -> Iterable[int]:`**
+
+      * **作用**：定义 `encode_iterable` 方法。
+      * **解释**：
+          * `self`: 实例本身。
+          * `iterable: Iterable[str]`: 输入参数。类型提示 `Iterable[str]` 表示它接收任何可以迭代产生字符串的对象（例如文件句柄、列表、元组等）。
+          * `-> Iterable[int]`: 返回类型提示。表示这个方法返回一个可以迭代产生整数（token ID）的对象（即一个生成器）。
+
+  * **行 1.2 `for chunk in iterable:`**
+
+      * **作用**：启动循环，遍历输入的 `iterable` 对象。
+      * **解释**：`iterable` 会逐一提供它的元素（例如文件的一行行文本），每次迭代将一个元素赋值给 `chunk` 变量（类型为 `str`）。
+
+  * **行 2.1 `ids_for_chunk = self.encode(chunk)`**
+
+      * **作用**：调用**同一个类**的 `encode` 方法。
+      * **解释**：将当前获取到的文本块 `chunk` 传递给 `self.encode()` 方法，获取代表这个 `chunk` 的 token ID **列表** (`list[int]`)，并将其存储在 `ids_for_chunk` 变量中。
+
+  * **行 2.2 `yield from ids_for_chunk`**
+
+      * **作用**：将 `ids_for_chunk` 列表中的**所有**元素**逐个地**作为 `encode_iterable` 方法的返回值“产出”。
+      * **解释**：`yield from` 是一个语法糖。它会迭代 `ids_for_chunk` 列表，并将列表中的每个整数 ID 通过 `yield` 语句返回给调用者。`yield` 会暂停 `encode_iterable` 的执行，直到调用者请求下一个 ID 时才恢复。
+
+  * **行 2.3 `yield from self.encode(chunk)`**
+
+      * **作用**：这是行 2.1 和 2.2 的等价、更简洁的写法。
+      * **解释**：直接将 `self.encode(chunk)` 返回的列表传递给 `yield from`，效果完全相同。
+
+-----
+
+# 总结与后续
+
+至此，您已经学习并理解了 `BPETokenizer` 类的所有核心方法：`__init__`, `decode`, `encode`, 以及它们的辅助函数 `_apply_merges` (或 `_mergeAccordingRank`) 和 `_tokenize_normal`，还有流式处理的 `encode_iterable`。
+
+### **完整的 `BPETokenizer` 类 (基于您的实现和优秀代码)**
+
+```python
+from collections import defaultdict, Counter
+import regex as re
+from typing import Dict, List, Tuple, Optional, Iterable, Any # 确保导入了 Iterable, Optional, Any
+
+# --- 辅助函数和 PAT 定义 ---
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+def strToTupleBytes(word_str: str) -> tuple[bytes]:
+    byte_list = [bytes([b]) for b in word_str.encode("utf-8")]
+    return tuple(byte_list)
+
+# --- BPETokenizer 类 ---
+class BPETokenizer:
+    def __init__(
+        self,
+        vocab: dict[int, bytes],
+        merges: list[tuple[bytes, bytes]],
+        spectial_tokens: Optional[List[str]] = None # 添加 Optional 和默认值 None
+    ):
+        self.vocab = vocab
+        self.merges = merges
+        # 使用 spectial_tokens (小写 s) 匹配参数名
+        self.spectialTokens = spectial_tokens or [] 
+
+        self.bytesToIntVocab = {v : k for k, v in vocab.items()}
+        self.bpeRanks = dict(zip(merges, range(len(merges))))
+        self.spectialTokenBytes = [token.encode("utf-8") for token in self.spectialTokens]
+
+        for tokenBytes in self.spectialTokenBytes:
+            if tokenBytes not in self.bytesToIntVocab:
+                newID = len(self.vocab)
+                self.vocab[newID] = tokenBytes
+                self.bytesToIntVocab[tokenBytes] = newID
+
+    def decode(self, ids: list[int]) -> str:
+        allBytes = [self.vocab.get(id) for id in ids]
+        clearNoneBytes = b"".join(b for b in allBytes if b is not None)
+        return clearNoneBytes.decode("utf-8", errors="replace")
+
+    def _mergeAccordingRank(self, tupleBytes) -> list[bytes]:
+        listBytes = list(tupleBytes)
+        adjPairs = set(zip(listBytes, listBytes[1:]))
+
+        if not adjPairs:
+            return listBytes
+        
+        while True:
+            try:
+                targetMerge = min(adjPairs, key=lambda pair: self.bpeRanks.get(pair, float('inf')))
+            except ValueError: 
+                break 
+
+            if targetMerge not in self.bpeRanks:
+                break
+
+            first, second = targetMerge
+            i = 0
+            newListBytes = []
+            while i < len(listBytes):
+                try:
+                    j = listBytes.index(first, i)
+                except ValueError:
+                    newListBytes.extend(listBytes[i: ])
+                    break 
+                else:
+                    newListBytes.extend(listBytes[i: j])
+                    i = j
+
+                if listBytes[i] == first and i + 1 < len(listBytes) and listBytes[i + 1] == second:
+                    newListBytes.append(first + second)
+                    i += 2
+                else:
+                    newListBytes.append(listBytes[i])
+                    i += 1
+            
+            listBytes = newListBytes
+            if len(listBytes) == 1:
+                break
+            else:
+                adjPairs = set(zip(listBytes, listBytes[1:]))
+
+        return listBytes
+    
+    def _tokenizeNormal(self, text: str) -> list[int]:
+        preTokens = []
+        for match in re.finditer(PAT, text): 
+            word = match.group(0)
+            preTokens.append(word)
+
+        tokenID = []
+        for word_str in preTokens: 
+            wordTupleByte = strToTupleBytes(word_str) 
+            merged_bytes_list = self._mergeAccordingRank(wordTupleByte) 
+            # 使用 [] 索引，假设 _mergeAccordingRank 的结果一定在 vocab 中
+            tokenID.extend(self.bytesToIntVocab[b] for b in merged_bytes_list) 
+
+        return tokenID
+
+    def encode(self, text: str) -> list[int]:
+        token = []
+        # 使用 self.spectialTokens (小写 s) 匹配 __init__ 中的变量
+        sortedSpectialToken = sorted(self.spectialTokens, key=len, reverse=True) 
+        sortedSpectialPattern = "|".join(map(re.escape, sortedSpectialToken))
+        if sortedSpectialPattern:
+            paragraphList = re.split(f"({sortedSpectialPattern})", text)
+        else:
+            paragraphList = [text]
+
+        for paragraph in paragraphList:
+            if not paragraph:
+                continue 
+
+            # 使用 self.spectialTokens (小写 s)
+            if paragraph in self.spectialTokens: 
+                token.append(self.bytesToIntVocab[paragraph.encode("utf-8")]) 
+            else:
+                token.extend(self._tokenizeNormal(paragraph))
+
+        return token
+
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterable[int]:
+        for chunk in iterable:
+            yield from self.encode(chunk)
+
+```
+
+*(注意：我对您代码中的 `spectial_tokens` 变量的大小写进行了一些统一，并为 `__init__` 添加了 `Optional` 和默认值，以匹配讲义接口。)*
+
+### **接下来的学习**
+
+您现在已经完全掌握了 BPE Tokenizer 的训练 (`train_bpe`) 和使用 (`BPETokenizer` 类) 的实现！
+
+根据课程讲义，下一步就是进入**第 3 节：Transformer 语言模型架构**。我们将开始从头构建模型本身，通常从最基础的组件开始：
+
+  * **`Linear` 模块**
+  * **`Embedding` 模块**
+  * **`RMSNorm` 模块**
+
+您想开始学习如何实现 `Linear` 模块吗？
