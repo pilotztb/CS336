@@ -13,6 +13,8 @@ from torch import Tensor
 # from cs336_basics.tokenizer import train_bpe, BPETokenizer
 from cs336_basics.bpetokenizer_my_try import BPETokenizer
 from cs336_basics.train_bpe_my_try import train_bpe
+# from cs336_basics.model import Linear, Embedding, RMSNorm
+from cs336_basics.model_my_try import Linear
 
 def run_linear(
     d_in: int,
@@ -33,7 +35,17 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
 
-    raise NotImplementedError
+    linear_layer = Linear(d_in=d_in, d_out=d_out)
+
+    # 2. 将测试提供的权重加载到实例中
+    #    PyTorch 模块的 state_dict 期望的键名通常是 'weight'
+    state_dict = {"weight": weights}
+    linear_layer.load_state_dict(state_dict)
+
+    # 3. 将输入传递给 forward 方法并返回结果
+    #    测试用例会确保 in_features 在正确的设备上
+    output = linear_layer(in_features)
+    return output
 
 
 def run_embedding(
