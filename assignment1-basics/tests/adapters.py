@@ -15,6 +15,7 @@ from cs336_basics.bpetokenizer_my_try import BPETokenizer
 from cs336_basics.train_bpe_my_try import train_bpe
 # from cs336_basics.model import Linear, Embedding, RMSNorm
 from cs336_basics.model_my_try import Linear
+from cs336_basics.model_my_try import Embedding
 
 def run_linear(
     d_in: int,
@@ -66,8 +67,11 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-
-    raise NotImplementedError
+    embedding_layer = Embedding(vocab_size=vocab_size, d_model=d_model)
+    state_dict = {"weight": weights}
+    embedding_layer.load_state_dict(state_dict)
+    output = embedding_layer(token_ids)
+    return output
 
 
 def run_swiglu(
