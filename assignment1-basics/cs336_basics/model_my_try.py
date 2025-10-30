@@ -67,3 +67,24 @@ class RMSNorm(nn.Module):
         x = self.weight * tmp_compute_res
         
         return x.to(in_dtype)
+
+
+def silu(x):
+    return x * torch.sigmoid(x)
+
+class SwiGLU(nn.Module):
+    def __init__(
+        self,
+        d_model,
+        d_ff
+    ):
+        super().__init__()
+        self.w1 = Linear(d_model, d_ff)
+        self.w2 = Linear(d_ff, d_model)
+        self.w3 = Linear(d_model, d_ff)
+
+    def forward(self, x):
+        gate = silu(self.w1(x))
+        content = self.w3(x)
+        gated_content = gate * content
+        return self.w2(gated_content)

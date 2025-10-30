@@ -17,7 +17,7 @@ from cs336_basics.train_bpe_my_try import train_bpe
 from cs336_basics.model_my_try import Linear
 from cs336_basics.model_my_try import Embedding
 from cs336_basics.model_my_try import RMSNorm
-
+from cs336_basics.model_my_try import SwiGLU
 
 def run_linear(
     d_in: int,
@@ -105,7 +105,15 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu = SwiGLU(d_model=d_model, d_ff=d_ff)
+    state_dict = {
+        "w1.weight": w1_weight,
+        "w2.weight": w2_weight,
+        "w3.weight": w3_weight,
+    }
+    swiglu.load_state_dict(state_dict)
+    output = swiglu(in_features)
+    return output
 
 
 def run_scaled_dot_product_attention(
