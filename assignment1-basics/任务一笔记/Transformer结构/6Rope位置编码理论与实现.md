@@ -646,16 +646,214 @@ class RotaryEmbedding(nn.Module): # 1.1
 
   * **行 3.2 `x1, x2 = rearrange(x, '... (half_d xy) -> xy ... half_d', xy=2)`**
 
-      * **作用**：**拆分** $d_k$ 维向量为**两两一组**。
-      * **解释**：`einops.rearrange` 是一个强大的张量重排工具。
-          * `... (half_d xy)`：匹配输入 `x`，`...` 匹配所有前导维度，`d` 维度被拆分为 `half_d` (即 `dim/2`) 和 `xy` (大小为 2)。
-          * `-> xy ... half_d`：重排输出。`xy` (大小 2) 被移到最前面，`...` 和 `half_d` 保持。
-          * **结果**：`x1` 获得了所有偶数索引的特征（`xy=0`），`x2` 获得了所有奇数索引的特征（`xy=1`）。`x1` 和 `x2` 的形状都是 `(..., seq, dim/2)`。这对应于 $q_{even}$ 和 $q_{odd}$。
+      这行代码 `x1, x2 = rearrange(x, '... (half_d xy) -> xy ... half_d', xy=2)` 是 `RoPE` 实现中的精髓，它同时完成了**拆分**和**解包**两个任务。
+
+      我们将它分解为两个主要部分（“块”）来详细解析：
+
+      1.  **`rearrange(...)` 函数调用**：这是核心的张量重排操作。
+      2.  **`x1, x2 = ...` 赋值**：这是 Python 的解包语法，用于接收结果。
+
+      -----
+
+      **第 1 块解析: `rearrange(x, '... (half_d xy) -> xy ... half_d', xy=2)`**
+
+      **(1) 语法点 (Syntax)**
+
+        * 这是一个对 `einops` 库中 `rearrange` 函数的调用。
+        * **基本语法**：`rearrange(input_tensor, '输入模式 -> 输出模式', **维度关键字参数)`。
+        * **`input_tensor`**：是 `x`，即输入的 Q 或 K 向量张量。
+        * **`'输入模式 -> 输出模式'`**：这是 `einops` 的核心规则字符串。
+            * **输入模式**：`'... (half_d xy)'`
+            * **输出模式**：`'xy ... half_d'`
+        * **`**维度关键字参数`**：是 `xy=2`。
+
+      **(2) 算法逻辑 (Algorithm Logic)**
+
+      `rearrange` 函数的逻辑是**根据规则字符串，对输入张量 `x` 的维度进行分解和重组**。
+
+      1.  **匹配输入模式：`'... (half_d xy)'`**
+            * `x` 的原始形状是 `(..., dim)`，其中 `...` 代表所有前导维度（例如 `batch_size, num_heads, seq_len`），`dim` 是最后一个维度（即 $d_k$ 或 `d_head`，例如 64）。
+            * `...` (省略号)：匹配 `x` 的所有前导维度 `(...,)`。
+            * `(half_d xy)`：这是一个**分解**操作。它告诉 `rearrange` 将 `x` 的最后一个维度 `dim` 分解为**两个**新的子维度，名为 `half_d` 和 `xy`。
+            * `xy=2`：这个关键字参数**指定**了 `xy` 这个新维度的**大小必须是 2**。
+            * `half_d`：`rearrange` 会自动**推断** `half_d` 的大小。`half_d = dim / 2`（例如 `64 / 2 = 32`）。
+            * **逻辑结果**：`rearrange` 在内部将 `x` 视作 (view) 一个形状为 `(..., half_d, 2)` 的张量。这就是 `RoPE` 理论中“两两一组” 的来源：`half_d` 是“对”的索引（从 0 到 31），`xy` 是“对”内部的索引（0 或 1）。
+            
+      2.  **重排为输出模式：`'-> xy ... half_d'`**
+
+            * `->`：分隔符，表示“重排为...”。
+            * `xy`: 将 `xy` 维度（大小为 2）移动到**最前面**。
+            * `...`: 将所有被 `...` 匹配的前导维度放在 `xy` 之后。
+            * `half_d`: 将 `half_d` 维度（大小为 32）移动到**最后面**。
+            * **逻辑结果**：`rearrange` 将内部 `(..., half_d, 2)` 形状的张量**转置 (transpose)** 并重排为 `(2, ..., half_d)` 形状。
+
+      **总结**：`rearrange` 这个函数调用，一步到位地将形状为 `(..., 64)` 的张量，重塑并转置为了形状为 `(2, ..., 32)` 的张量。
+
+      **(3) 推导思路 (Derivation/Thought Process)**
+
+        * **目标**：我们需要实现 `RoPE` 的 2D 旋转公式：
+            * $q'_{even} = q_{even} \cos\theta - q_{odd} \sin\theta$
+            * $q'_{odd} = q_{even} \sin\theta + q_{odd} \cos\theta$
+        * **问题**：我们的输入 `x` (即 $q$ 向量) 的形状是 `(..., dim)`，偶数位特征（`q_even`）和奇数位特征（`q_odd`）是**交错 (interleaved)** 排列的：`[q0, q1, q2, q3, ...]`。
+        * **需求**：为了执行上面高效的向量化乘法，我们必须**首先**将 `x` **拆分**成两个独立的张量：
+            * `x1`：包含所有偶数位特征 `[q0, q2, q4, ...]`。
+            * `x2`：包含所有奇数位特征 `[q1, q3, q5, ...]`。
+        * **如何拆分？**
+          1.  **步骤 A (View)**：将 `(..., dim)` 视作 `(..., dim/2, 2)`。现在 `x[..., k, 0]` 是第 `k` 个偶数位特征，`x[..., k, 1]` 是第 `k` 个奇数位特征。
+          2.  **步骤 B (Transpose)**：我们想要把所有索引为 0 的（偶数）和索引为 1 的（奇数）特征分别收集起来。我们可以通过**转置**实现：将 `(..., dim/2, 2)` 变为 `(2, ..., dim/2)`。
+          3.  **步骤 C (Slice)**：转置后，`output[0, ...]` 就是所有偶数位特征 `x1`，`output[1, ...]` 就是所有奇数位特征 `x2`。
+        * **`rearrange` 的作用**：`einops.rearrange` 这个函数**一次性**就完成了**步骤 A 和 B**。
+            * `'... (half_d xy)'` (配合 `xy=2`) 实现了**步骤 A (View)**。
+            * `'-> xy ... half_d'` 实现了**步骤 B (Transpose)**。
+
+      **(4) 迁移技巧 (Transferable Skill)**
+
+        * `rearrange` 是处理多维张量（尤其是 Transformer）的瑞士军刀。
+        * **技巧 1：拆分维度**。`'b (h s) d -> b h s d'` (将 `h*s` 的维度拆分为 `h` 和 `s`)。在多头注意力中，`d_model -> (num_heads d_head)` 就是这个模式的变体 `... (h d) -> ... h d`。
+        * **技巧 2：合并维度**。`'b h s d -> b (h s) d'` (将 `h` 和 `s` 合并)。
+        * **技巧 3：轴转置**。`'b h s d -> b s h d'` (交换 `h` 和 `s` 轴)。
+        * **您学到的这个模式**：`'... (group size) -> size ... group'` 是“**解交错 (de-interleaving)**”或“分组重排”的标准技巧。
+
+      -----
+
+      **第 2 块解析: `x1, x2 = ...`**
+
+      **(1) 语法点 (Syntax)**
+
+        * 这是标准的 **Python 解包赋值 (Unpacking Assignment)**，也常被称为**元组解构 (Tuple Destructuring)**（尽管这里解包的是 PyTorch 张量）。
+
+      **(2) 算法逻辑 (Algorithm Logic)**
+
+        * `rearrange` 函数（第 1 块）的**返回值**是一个**单一的 PyTorch 张量**。
+        * 我们知道这个返回张量的**第一个维度** (`xy`) 的**大小 (size) 是 2**。
+        * 当 Python 看到一个赋值语句 `var1, var2 = some_iterable` 时，它会尝试从 `some_iterable` 中迭代获取两个元素，分别赋给 `var1` 和 `var2`。
+        * PyTorch 张量支持**沿第一个维度**进行迭代。因此，将一个**第一个维度大小为 2** 的张量（形状 `(2, ..., half_d)`）赋值给 `x1, x2` 时：
+            * `x1` 被赋值为 `rearrange_output[0]`（即 `xy=0` 的切片，**所有偶数位特征**）。
+            * `x2` 被赋值为 `rearrange_output[1]`（即 `xy=1` 的切片，**所有奇数位特征**）。
+        * **逻辑结果**：`x1` 获得了 `q_even` / $k_{even}$（形状 `(..., half_d)`），`x2` 获得了 $q_{odd}$ / $k_{odd}$（形状 `(..., half_d)`）。
+
+      **(3) 推导思路 (Derivation/Thought Process)**
+
+        * **目标**：我们需要两个独立的变量 `x1` (偶数位) 和 `x2` (奇数位)，以便将它们分别代入 `RoPE` 的旋转公式。
+        * **已知**：第 1 块的 `rearrange` 操作返回了一个**单一**的、形状为 `(2, ..., half_d)` 的张量，其中 `[0, ...]` 是偶数位，`[1, ...]` 是奇数位。
+        * **方案 A (啰嗦)**：
+          ```python
+          output_tensor = rearrange(x, '... (half_d xy) -> xy ... half_d', xy=2)
+          x1 = output_tensor[0]
+          x2 = output_tensor[1]
+          ```
+        * **方案 B (Pythonic, 简洁)**：
+          ```python
+          x1, x2 = rearrange(x, '... (half_d xy) -> xy ... half_d', xy=2)
+          ```
+        * “优秀代码” 选择了方案 B，因为它更简洁、更符合 Python 风格，并且避免了创建不必要的中间变量 `output_tensor`。
+
+      **(4) 迁移技巧 (Transferable Skill)**
+
+        * **张量解包**：这是 PyTorch 中非常常见的技巧。当你使用 `torch.split(tensor, ...)` 或 `torch.chunk(tensor, 2, ...)` 将一个张量分割成 N 块时，返回的是一个包含 N 个张量的**元组**，你总是会用 `chunk1, chunk2, ... = torch.chunk(...)` 来接收它们。
+        * `rearrange` 返回的是一个**单一**张量，但通过巧妙地将其设计为在**第一个维度**上具有所需的分块数量（这里是 2），我们可以**利用** Python 的解包语法，达到与 `torch.chunk` 类似的效果，非常优雅。
 
   * **行 3.3 `cos, sin = einx.get_at(...)`**
 
-      * **作用**：根据 `pos_ids` 从缓存 `_freq_cis_cache` 中**查找**对应的 $\sin/\cos$ 值。
-      * **解释**：`einx.get_at` 类似于 `_freq_cis_cache[:, pos_ids, :]`。它使用 `pos_ids` (形状 `(..., seq)`) 作为索引，去 `_freq_cis_cache` (形状 `(2, context_length, dim/2)`) 的 `pos` (即 `context_length`) 维度上查找，得到形状为 `(2, ..., seq, dim/2)` 的 `cos` 和 `sin` 值。
+      这行代码 `cos, sin = einx.get_at('cos_sin [pos] half_dim, ... -> cos_sin ... half_dim', self._freq_cis_cache, pos_ids)` 是 `RoPE` 实现中的另一个精髓，它负责**高效地从缓存中查找**所需的位置编码。
+
+      我们将它分解为两个主要部分（“块”）来详细解析：
+
+      1.  **`einx.get_at(...)` 函数调用**：这是核心的“广播化索引”或“收集”操作。
+      2.  **`cos, sin = ...` 赋值**：这是 Python 的解包语法，用于分离 `cos` 和 `sin` 的值。
+
+      -----
+
+      **第 1 块解析: `einx.get_at('...', self._freq_cis_cache, pos_ids)`**
+
+      **(1) 语法点 (Syntax)**
+
+        * 这是一个对 `einx` 库中 `get_at` 函数的调用。`einx` 是 `einops` 的一个扩展库（讲义中也推荐了 `einx`）。
+        * **基本语法**：`einx.get_at('输入张量模式, 索引张量模式 -> 输出张量模式', input_tensor, index_tensor)`。
+        * **`input_tensor`**：是 `self._freq_cis_cache`，即我们在 `__init__` 中预先计算好的 `sin`/`cos` 查找表。
+        * **`index_tensor`**：是 `pos_ids`，即 `forward` 方法接收到的、包含 token 位置索引的张量。
+        * **`'...'` (规则字符串)**：是 `'cos_sin [pos] half_dim, ... -> cos_sin ... half_dim'`。
+
+      **(2) 算法逻辑 (Algorithm Logic)**
+
+      `einx.get_at` 函数的逻辑是执行一次**广播化的索引 (broadcasted indexing)** 或**收集 (gathering)** 操作。它的作用等价于 PyTorch 中的 `torch.gather` 或高级索引 `tensor[indices]`，但 `einx` 提供了更强大、更灵活的语法来处理复杂的多维索引。
+
+      1.  **目标**：`RoPE` 的 `forward` 方法 接收到的 `pos_ids` 不是一个简单的一维列表 `[0, 1, 2]`，而是可能带有批次（batch）和注意力头（head）维度的张量，形状如 `(batch_size, num_heads, seq_len)`（在 `einx` 语法中简写为 `... seq`）。我们需要根据这个 `pos_ids` 张量中的**每一个**位置索引，去 `_freq_cis_cache` 中查找到对应的 `cos` 和 `sin` 值。
+      2.  **输入形状**：
+            * `self._freq_cis_cache` (查找表)：形状为 `(2, context_length, dim/2)`。
+            * `pos_ids` (索引)：形状为 `(..., seq_len)`（例如 `(batch, heads, seq_len)`）。
+      3.  **规则字符串解析**：`'cos_sin [pos] half_dim, ... -> cos_sin ... half_dim'`
+            * **`cos_sin [pos] half_dim, ...`**（输入部分）：
+                * `cos_sin [pos] half_dim` 描述了 `self._freq_cis_cache`。
+                    * `cos_sin`：为第 1 个维度（大小为 2）命名。
+                    * `[pos]`：为第 2 个维度（大小为 `context_length`）命名。**方括号 `[]`** 是 `einx.get_at` 的关键语法，它标记**这个维度**是即将被**索引**的维度。
+                    * `half_dim`：为第 3 个维度（大小为 `dim/2`）命名。
+                * `...` (逗号之后)：描述了 `pos_ids`。`...` 匹配 `pos_ids` 的所有维度（例如 `(batch, heads, seq_len)`）。
+            * **`-> cos_sin ... half_dim`**（输出部分）：
+                * 描述了输出张量的形状。
+                * `cos_sin`：保留 `self._freq_cis_cache` 的 `cos_sin` 维度（大小为 2）在最前面。
+                * `...`：将 `pos_ids` 的**所有**维度（`...`）插入到这里。
+                * `half_dim`：保留 `self._freq_cis_cache` 的 `half_dim` 维度（大小为 `dim/2`）在最后面。
+      4.  **逻辑结果**：`einx.get_at` 根据 `pos_ids`（形状 `(..., seq_len)`）中的值，作为索引去 `self._freq_cis_cache` 的 `[pos]` 维度（`context_length`）上查找。它会自动处理 `pos_ids` 的 `...` 维度（批次和头），将查找到的结果按照 `pos_ids` 的 `...` 维度进行广播。最终返回一个形状为 `(2, ..., seq_len, dim/2)` 的张量。
+
+      #### (3) 推导思路 (Derivation/Thought Process)
+
+        * **目标**：我们需要从 `_freq_cis_cache`（形状 `(2, context_length, dim/2)`） 中，根据 `pos_ids`（形状 `(..., seq_len)`） 查找到对应的 `(cos, sin)` 值。
+        * **问题**：`pos_ids` 是多维的（`...`）。如果用 PyTorch 原生索引，我们可能需要写 `_freq_cis_cache[:, pos_ids, :]`。这在 `pos_ids` 是一维时能工作，但当 `pos_ids` 是多维时，PyTorch 的高级索引规则会变得非常复杂，可能需要手动 `expand` 或 `broadcast_to` 来匹配所有 `...` 维度，非常繁琐且容易出错。
+        * **`einx` 的解决方案**：讲义 和“优秀代码” 推荐使用 `einx` 正是因为 `einx.get_at` 专门解决了这个问题。
+        * **思路**：
+          1.  我们要查找的“表”是 `_freq_cis_cache`，形状是 `(cos_sin, pos, half_dim)`。
+          2.  我们要索引的维度是 `pos`。标记它：`'cos_sin [pos] half_dim'`。
+          3.  我们的“索引”是 `pos_ids`，它的形状我们不在乎，只想保留，所以用 `'...'` 描述。
+          4.  我们想要的输出形状是 `(cos_sin, ..., half_dim)`，其中 `...` 是 `pos_ids` 的形状。
+          5.  组合起来，规则就是：`'cos_sin [pos] half_dim, ... -> cos_sin ... half_dim'`。
+
+      #### (4) 迁移技巧 (Transferable Skill)
+
+        * **`einx.get_at` (或 `torch.gather`)**：这是在 PyTorch/NumPy 中执行“**广播化查找 (Broadcasted Lookup)**”或“**收集 (Gather)**”操作的标准工具。
+        * **核心技巧**：当你需要用一个**高维张量**（例如 `pos_ids`，形状 `(B, H, S)`）去**索引**另一个张量（例如 `cache`，形状 `(N, D)`）的**某个特定维度**（例如 `N`），并且希望输出张量**保留**索引张量的高维结构（例如 `(B, H, S, D)`）时，`einx.get_at` 的 `[dim]` 和 `...` 语法是最清晰、最不容易出错的实现方式。
+
+      -----
+
+      ### **第 2 块解析: `cos, sin = ...`**
+
+      #### (1) 语法点 (Syntax)
+
+        * 这是标准的 **Python 解包赋值 (Unpacking Assignment)**。
+
+      #### (2) 算法逻辑 (Algorithm Logic)
+
+        * `einx.get_at` 函数（第 1 块）的**返回值**是一个**单一的 PyTorch 张量**。
+        * 根据我们的分析，这个返回张量的**第一个维度**（即 `cos_sin` 维度）的**大小 (size) 是 2**。
+        * Python 的解包赋值 `var1, var2 = some_iterable` 可以作用于任何可迭代对象。PyTorch 张量默认**沿第一个维度**可迭代。
+        * 因此，`cos, sin = ...` 这行代码会：
+            * `cos` = ( `einx.get_at` 返回张量的第 0 个切片 `[0]` )。这对应 `_init_cache` 中 `torch.stack((cos, sin))` 的 `cos` 部分。
+            * `sin` = ( `einx.get_at` 返回张量的第 1 个切片 `[1]` )。这对应 `sin` 部分。
+        * **逻辑结果**：`cos` 获得了所有查找匹配的 `cos` 值（形状 `(..., seq, half_d)`），`sin` 获得了所有 `sin` 值（形状 `(..., seq, half_d)`）。
+
+      #### (3) 推导思路 (Derivation/Thought Process)
+
+        * **目标**：我们需要两个独立的张量 `cos` 和 `sin`，以便在下一步执行 2D 旋转公式：
+            * `x1_rot = cos * x1 - sin * x2`
+            * `x2_rot = sin * x1 + cos * x2`
+        * **已知**：
+          1.  `_init_cache` 使用 `torch.stack((cos, sin))` 将 `cos` 放在索引 0，`sin` 放在索引 1。
+          2.  `einx.get_at` 返回的张量保持了这个 `(2, ...)` 的形状结构。
+        * **方案 A (啰嗦)**：
+          ```python
+          cache_lookup = einx.get_at(...)
+          cos = cache_lookup[0]
+          sin = cache_lookup[1]
+          ```
+        * **方案 B (Pythonic, 简洁)**：
+          ```python
+          cos, sin = einx.get_at(...)
+          ```
+        * “优秀代码” 选择了方案 B，因为它利用了 Python 的解包特性，代码更简洁。
+
+      #### (4) 迁移技巧 (Transferable Skill)
+
+        * **张量解包**：这是 `rearrange` 和 `einx` 中非常常见的技巧。当你明确知道一个操作返回的张量在第一个维度的大小是 N 时，可以直接用 N 个变量（例如 `x1, x2` 或 `cos, sin`）来解包赋值，提高代码可读性。
 
   * **行 3.4 `x1_rot = cos * x1 - sin * x2`**
 
@@ -676,7 +874,7 @@ class RotaryEmbedding(nn.Module): # 1.1
 
       * **作用**：返回旋转后的张量 `x'`。
 
-### **段落 4: (可选) 辅助方法**
+# **段落 4: (可选) 辅助方法**
 
   * **行 4.1 `def extra_repr(self):`**
       * **作用**：定义自定义的打印输出。
