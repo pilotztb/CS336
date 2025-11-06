@@ -10,14 +10,17 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 
-# from cs336_basics.tokenizer import train_bpe, BPETokenizer
-from cs336_basics.bpetokenizer_my_try import BPETokenizer
-from cs336_basics.train_bpe_my_try import train_bpe
-# from cs336_basics.model import Linear, Embedding, RMSNorm
-from cs336_basics.model_my_try import Linear
-from cs336_basics.model_my_try import Embedding
-from cs336_basics.model_my_try import RMSNorm
-from cs336_basics.model_my_try import SwiGLU
+# # from cs336_basics.tokenizer import train_bpe, BPETokenizer
+# from task_code.bpetokenizer_my_try import BPETokenizer
+# from task_code.train_bpe_my_try import train_bpe
+# # from cs336_basics.model import Linear, Embedding, RMSNorm
+# from task_code.model_my_try import Linear
+# from task_code.model_my_try import Embedding
+# from task_code.model_my_try import RMSNorm
+# from task_code.model_my_try import SwiGLU
+from assignment1.task_code.Linear import Linear
+
+
 
 def run_linear(
     d_in: int,

@@ -53,13 +53,13 @@ $Y = XW^T$
 这句话描述的是当我们将线性变换 $y = Wx$ 应用于具有**多个维度**的输入张量 `X` 时，实际的运算方式。
 
 * **单个向量的情况**：
-    
+  
     * 如果输入 `x` 只是一个单独的向量，形状是 `(d_in,)`。
     * 权重 `W` 形状是 `(d_out, d_in)`。
     * 线性变换 `y = Wx` (数学上的标准写法，假设 x 是列向量) 或者 `y = xW^T` (行向量写法，后面会解释) 会得到一个形状为 `(d_out,)` 的输出向量 `y`。
     
 * **批处理张量的情况**：
-    
+  
     * 在 Transformer 中，我们的输入 `X` 通常不是单个向量，而是包含多个向量的张量。例如，在 `Linear` 模块接收到的输入 `x` 可能形状是 `(batch_size, sequence_length, d_in)` 。
     * 这个张量可以看作是一个“集合”，它包含了 `batch_size * sequence_length` 个独立的向量，每个向量的长度是 `d_in`。这些向量分布在最后那个维度上。
     * **“对最后一个维度进行矩阵乘法”** 的意思就是：线性层 `y = Wx` 这个操作会**独立地**、**分别地**应用于 `X` 张量中**每一个** `d_in` 维度的向量上。
@@ -395,3 +395,77 @@ class Linear(nn.Module): # 1.1: 继承 nn.Module
   * 使用 `einsum` (或 `matmul` 与转置) 正确高效地实现了 `forward` 逻辑，能处理批处理输入。
 
 您对 `Linear` 模块的代码实现还有疑问吗？如果清楚了，我们就可以继续学习 `Embedding` 模块的理论知识了。
+
+# 测试
+
+## adapter修改
+
+### 头部引入
+
+```python
+from task_code.linear import Linear
+```
+
+### run_linear修改
+
+```python
+def run_linear(
+    d_in: int,
+    d_out: int,
+    weights: Float[Tensor, " d_out d_in"],
+    in_features: Float[Tensor, " ... d_in"],
+) -> Float[Tensor, " ... d_out"]:
+    """
+    Given the weights of a Linear layer, compute the transformation of a batched input.
+
+    Args:
+        in_dim (int): The size of the input dimension
+        out_dim (int): The size of the output dimension
+        weights (Float[Tensor, "d_out d_in"]): The linear weights to use
+        in_features (Float[Tensor, "... d_in"]): The output tensor to apply the function to
+
+    Returns:
+        Float[Tensor, "... d_out"]: The transformed output of your linear module.
+    """
+
+    linear_layer = Linear(d_in=d_in, d_out=d_out)
+
+    # 2. 将测试提供的权重加载到实例中
+    #    PyTorch 模块的 state_dict 期望的键名通常是 'weight'
+    state_dict = {"weight": weights}
+    linear_layer.load_state_dict(state_dict)
+
+    # 3. 将输入传递给 forward 方法并返回结果
+    #    测试用例会确保 in_features 在正确的设备上
+    output = linear_layer(in_features)
+    return output
+```
+
+## 运行测试
+
+```python
+uv run pytest -k test_linear
+```
+
+如果是创建了conda环境
+
+```python
+pytest -k test_linear
+```
+
+测试通过
+
+```
+(cs336-py312) root@4bb44d94b61a:~/CS336/assignment1# pytest -k test_linear
+================================================= test session starts =================================================
+platform linux -- Python 3.12.11, pytest-8.4.2, pluggy-1.6.0
+rootdir: /root/CS336/assignment1
+configfile: pyproject.toml
+plugins: jaxtyping-0.3.3
+collected 48 items / 47 deselected / 1 selected                                                                       
+
+tests/test_model.py::test_linear PASSED
+
+========================================== 1 passed, 47 deselected in 1.33s ===========================================
+```
+
