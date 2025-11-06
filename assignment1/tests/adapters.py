@@ -18,8 +18,8 @@ from torch import Tensor
 # from task_code.model_my_try import Embedding
 # from task_code.model_my_try import RMSNorm
 # from task_code.model_my_try import SwiGLU
-from assignment1.task_code.Linear import Linear
-
+from task_code.Linear import Linear
+from task_code.Embedding import Embedding
 
 
 def run_linear(
