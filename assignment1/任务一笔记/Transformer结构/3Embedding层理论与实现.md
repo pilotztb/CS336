@@ -306,4 +306,54 @@ class Embedding(nn.Module): # 1.1: 继承 nn.Module
   * `__init__` 负责构建并初始化这个查找表 (`self.weight`)。
   * `forward` 负责执行查找操作 (`self.weight[x]`)。
 
-您对 `Embedding` 模块的代码实现还有疑问吗？如果清楚了，我们就可以继续学习下一个组件：`RMSNorm` 模块的理论知识了。
+# 测试
+
+## `Embedding` 模块：`adapters.py` 修改
+
+1.  **添加导入**：
+    在 `hw1-basics/tests/adapters.py` 文件的**顶部**，添加一行，导入您刚刚创建的 `Embedding` 类（假设您将其保存在 `task_code/embedding.py` 文件中）：
+
+    ```python
+    from task_code.embedding import Embedding
+    ```
+
+2.  **替换 `run_embedding` 函数**：
+    在 `hw1-basics/tests/adapters.py` 文件中，找到 `run_embedding` 函数，并将其**完全替换**为以下版本：
+
+    ```python
+    def run_embedding(
+        vocab_size: int,
+        d_model: int,
+        weights: Float[Tensor, " vocab_size d_model"],
+        token_ids: Int[Tensor, " ..."],
+    ) -> Float[Tensor, " ... d_model"]:
+        """
+        Given the weights of an Embedding layer, get the embeddings for a batch of token ids.
+    
+        Args:
+            vocab_size (int): The number of embeddings in the vocabulary
+            d_model (int): The size of the embedding dimension
+            weights (Float[Tensor, "vocab_size d_model"]): The embedding vectors to fetch from
+            token_ids (Int[Tensor, "..."]): The set of token ids to fetch from the Embedding layer
+        
+        Returns:
+            Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
+        """
+        
+        # 1. 实例化您在 `task_code/embedding.py` 中定义的 Embedding 模块
+        my_embedding = Embedding(d_model=d_model, vocab_size=vocab_size)
+        
+        # 2. 加载测试提供的权重
+        # (这要求您在 Embedding 类的 __init__ 中将 nn.Parameter 命名为 "weight")
+        my_embedding.load_state_dict({'weight': weights})
+        
+        # 3. 运行您的模块的 forward 方法
+        return my_embedding(token_ids)
+    ```
+
+## `Embedding` 模块：运行测试
+
+```bash
+pytest -k test_embedding
+```
+
