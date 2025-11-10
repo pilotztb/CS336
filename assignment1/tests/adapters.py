@@ -20,6 +20,8 @@ from torch import Tensor
 # from task_code.model_my_try import SwiGLU
 from task_code.Linear import Linear
 from task_code.Embedding import Embedding
+from task_code.RMSNorm import RMSNorm
+from task_code.SwiGLU import SwiGLU
 
 
 def run_linear(
