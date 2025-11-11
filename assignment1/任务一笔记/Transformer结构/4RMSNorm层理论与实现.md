@@ -47,6 +47,7 @@ $RMSNorm(a) = \frac{a}{\sqrt{\frac{1}{d_{model}} \sum_{i=1}^{d_{model}} a_i^2 + 
 * **继承 `nn.Module`**：必须作为 `torch.nn.Module` 的子类来实现。
 * **可学习参数 (`weight`/gain `g`)**：
     * 需要一个形状为 `(d_model,)` 的可学习参数，代表公式中的增益 $g$。
+      * 之所有用一维，是因为可以通过广播得到二维然后执行元素级乘法
     * 这个参数通常命名为 `weight`（遵循 PyTorch `LayerNorm` 的惯例）。
     * 必须使用 `nn.Parameter` 包装。
 * **初始化 `weight`**：讲义 §3.4.1 规定，`RMSNorm` 的 `weight` (即增益 $g$) 初始值应为 **1**。
@@ -127,8 +128,6 @@ class RMSNorm(nn.Module): # 1.1
     def extra_repr(self): # 3.1
         return f"hidden_size={self.weight.shape[0]}, eps={self.eps}" # 3.2
 ```
-
-*(注：为了便于讲解，我将优秀代码 中 `forward` 方法的链式调用拆分成了 2.5a, 2.5b, 2.5c 三步，它们在功能上是等价的)*
 
 -----
 
