@@ -14,7 +14,8 @@ class RotaryPositionEmbedding(nn.Module):
         super().__init__()
         self.register_buffer(
             "_cos_sin_matrix",
-            RotaryPositionEmbedding._init_cos_sin_matrix(context_length, d_head, theta)
+            RotaryPositionEmbedding._init_cos_sin_matrix(context_length, d_head, theta),
+            persistent=False
         )
 
     @staticmethod

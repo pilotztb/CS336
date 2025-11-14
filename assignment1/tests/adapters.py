@@ -24,6 +24,7 @@ from task_code.RMSNorm import RMSNorm
 from task_code.SwiGLU import SwiGLU
 from task_code.RotaryPositionEmbeding import RotaryPositionEmbedding
 from task_code.func import scaled_dot_attention
+from task_code.MHSA import MHSA
 
 def run_linear(
     d_in: int,
@@ -174,7 +175,27 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    # 1. 实例化一个“假的”RoPE 模块
+    # (因为 __init__ 需要它，但 forward 已被注释掉)
+
+    # 2. 实例化您的 MHA 模块
+    my_mha = MHSA(
+        d_model=d_model,
+        head_num=num_heads,
+        position_encoder=None
+    )
+
+    # 3. 加载测试提供的权重
+    my_mha.load_state_dict({
+        'q_proj.weight': q_proj_weight,
+        'k_proj.weight': k_proj_weight,
+        'v_proj.weight': v_proj_weight,
+        'output_proj.weight': o_proj_weight,
+    })
+
+    # 4. 运行您的 forward
+    # (它只会传入 x, token_positions 将为 None)
+    return my_mha(x=in_features, token_position_id=None)
 
 
 def run_multihead_self_attention_with_rope(
@@ -214,7 +235,33 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    # 1. 实例化一个 *真正* 的 RoPE 模块
+    #    (注意：d_k = d_model // num_heads)
+    d_head = d_model // num_heads 
+    real_rope = RotaryPositionEmbedding(
+        context_length=max_seq_len, 
+        d_head=d_head, 
+        theta=theta
+    )
+    
+    # 2. 实例化您的 MHA 模块
+    my_mha = MHSA(
+        d_model=d_model,
+        head_num=num_heads,
+        position_encoder=real_rope # <-- 传入 *真正* 的 RoPE
+    )
+    
+    # 3. 加载权重
+    my_mha.load_state_dict({
+        'q_proj.weight': q_proj_weight,
+        'k_proj.weight': k_proj_weight,
+        'v_proj.weight': v_proj_weight,
+        'output_proj.weight': o_proj_weight,
+    })
+    
+    # 4. 运行您的 forward
+    #    (这次它会传入 x 和 token_positions)
+    return my_mha(in_features, token_position_id=token_positions)
 
 
 def run_rope(
