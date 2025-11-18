@@ -25,6 +25,7 @@ from task_code.SwiGLU import SwiGLU
 from task_code.RotaryPositionEmbeding import RotaryPositionEmbedding
 from task_code.func import scaled_dot_attention
 from task_code.MHSA import MHSA
+from task_code.TransformerBlock import TransformerBlock
 
 def run_linear(
     d_in: int,
@@ -181,7 +182,7 @@ def run_multihead_self_attention(
     # 2. 实例化您的 MHA 模块
     my_mha = MHSA(
         d_model=d_model,
-        head_num=num_heads,
+        num_heads=num_heads,
         position_encoder=None
     )
 
@@ -247,8 +248,8 @@ def run_multihead_self_attention_with_rope(
     # 2. 实例化您的 MHA 模块
     my_mha = MHSA(
         d_model=d_model,
-        head_num=num_heads,
-        position_encoder=real_rope # <-- 传入 *真正* 的 RoPE
+        num_heads=num_heads,
+        positional_encoder=real_rope # <-- 传入 *真正* 的 RoPE
     )
     
     # 3. 加载权重
@@ -361,7 +362,37 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    # 1. 准备 RoPE 需要的参数 (d_head)
+    d_head = d_model // num_heads
+
+    # 2. 实例化 RoPE 模块
+    # (注意：使用您之前实现的 RotaryPositionEmbedding)
+    rope = RotaryPositionEmbedding(
+        d_head=d_head,
+        context_length=max_seq_len,
+        theta=theta
+    )
+
+    # 3. 实例化您的 TransformerBlock
+    block = TransformerBlock(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        positional_encoder=rope
+    )
+
+    # 4. 加载测试权重
+    # 测试脚本提供的 weights 字典的键名 (例如 "attn.q_proj.weight", "ln1.weight")
+    # 正好对应您 TransformerBlock 中子模块的命名 (self.attn, self.ln1 等)
+    # 以及子模块内部的命名 (self.q_proj 等)。
+    # 所以直接 load_state_dict 应该就能成功。
+    block.load_state_dict(weights)
+
+    # 5. 运行前向传播
+    # in_features 已经在正确的设备上，直接传入
+    output = block(in_features)
+
+    return output
 
 
 def run_transformer_lm(

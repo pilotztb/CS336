@@ -1,5 +1,9 @@
-# (位于 hw1-basics/scripts/model.py)
-# ... (依赖我们之前实现的所有模块: RMSNorm, CausalMultiHeadSelfAttention, SwiGLU)
+import torch
+import torch.nn as nn
+from .RotaryPositionEmbeding import RotaryPositionEmbedding
+from .MHSA import MHSA
+from .SwiGLU import SwiGLU
+from .RMSNorm import RMSNorm
 
 class TransformerBlock(nn.Module): # 1.1
     """A single Transformer layer.
@@ -10,7 +14,7 @@ class TransformerBlock(nn.Module): # 1.1
         d_model: int,     # d_model = 512
         num_heads: int,   # num_heads = 16
         d_ff: int,        # d_ff = 1344 (来自 config.json)
-        positional_encoder: RotaryEmbedding, # 1.2
+        positional_encoder: RotaryPositionEmbedding, # 1.2
     ):
         super().__init__()
         
@@ -18,7 +22,7 @@ class TransformerBlock(nn.Module): # 1.1
         # 含义: 创建一个 CausalMultiHeadSelfAttention 实例。
         #       注意，它将 positional_encoder (RoPE 模块) 
         #       *传递* 给了 MHSA 的构造函数。
-        self.attn = CausalMultiHeadSelfAttention(
+        self.attn = MHSA(
             d_model=d_model,
             num_heads=num_heads,
             positional_encoder=positional_encoder, 
