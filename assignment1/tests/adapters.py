@@ -23,7 +23,7 @@ from task_code.Embedding import Embedding
 from task_code.RMSNorm import RMSNorm
 from task_code.SwiGLU import SwiGLU
 from task_code.RotaryPositionEmbeding import RotaryPositionEmbedding
-from task_code.func import scaled_dot_attention
+from assignment1.task_code.first_try.func import scaled_dot_attention
 from task_code.MHSA import MHSA
 from task_code.TransformerBlock import TransformerBlock
 
